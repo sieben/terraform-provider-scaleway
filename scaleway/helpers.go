@@ -1,19 +1,14 @@
 package scaleway
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
-	"regexp"
 	"strings"
-	"text/template"
 	"time"
 
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/scaleway/scaleway-sdk-go/namegenerator"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	"golang.org/x/xerrors"
@@ -156,14 +151,6 @@ func newRegionalIDString(region scw.Region, id string) string {
 	return fmt.Sprintf("%s/%s", region, id)
 }
 
-// deprecated and should not be used
-// newZonedIDStringFromRegion constructs a unique identifier based on resource region and id
-// but returns a zoned ID with the first zone in the region, i.e. adding `-1` to the region
-// TODO this function is a quick fix
-func newZonedIDStringFromRegion(region scw.Region, id string) string {
-	return fmt.Sprintf("%s-1/%s", region, id)
-}
-
 // terraformResourceData is an interface for *schema.ResourceData. (used for mock)
 type terraformResourceData interface {
 	HasChange(string) bool
@@ -192,7 +179,7 @@ func extractZone(d terraformResourceData, meta *Meta) (scw.Zone, error) {
 		return zone, nil
 	}
 
-	return scw.Zone(""), ErrZoneNotFound
+	return "", ErrZoneNotFound
 }
 
 // ErrRegionNotFound is returned when no region can be detected
@@ -212,7 +199,7 @@ func extractRegion(d terraformResourceData, meta *Meta) (scw.Region, error) {
 		return region, nil
 	}
 
-	return scw.Region(""), ErrRegionNotFound
+	return "", ErrRegionNotFound
 }
 
 // isHTTPCodeError returns true if err is an http error with code statusCode
@@ -295,44 +282,6 @@ func newRandomName(prefix string) string {
 
 const gb uint64 = 1000 * 1000 * 1000
 
-var UUIDRegex = regexp.MustCompile(`[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}`)
-
-// isUUID returns true if the given string have an UUID format.
-func isUUID(s string) bool {
-	return UUIDRegex.MatchString(s)
-}
-
-// newTemplateFunc takes a go template string and returns a function that can be called to execute template.
-func newTemplateFunc(tplStr string) func(data interface{}) string {
-	t := template.Must(template.New("tpl").Parse(tplStr))
-	return func(tplParams interface{}) string {
-		buffer := bytes.Buffer{}
-		err := t.Execute(&buffer, tplParams)
-		if err != nil {
-			panic(err) // lintignore:R009
-		}
-		return buffer.String()
-	}
-}
-
-// testAccGetResourceAttr can be used in acceptance tests to extract value from state and store it in dest
-func testAccGetResourceAttr(resourceName string, attrName string, dest *string) resource.TestCheckFunc {
-	return func(state *terraform.State) error {
-		r, exist := state.RootModule().Resources[resourceName]
-		if !exist {
-			return fmt.Errorf("unknown ressource %s", resourceName)
-		}
-
-		a, exist := r.Primary.Attributes[attrName]
-		if !exist {
-			return fmt.Errorf("unknown ressource %s", resourceName)
-		}
-
-		*dest = a
-		return nil
-	}
-}
-
 func flattenTime(date *time.Time) interface{} {
 	if date != nil {
 		return date.Format(time.RFC3339)
@@ -374,10 +323,7 @@ func expandStringWithDefault(data interface{}, defaultValue string) string {
 }
 
 func expandStrings(data interface{}) []string {
-	if data == nil {
-		return []string{}
-	}
-	stringSlice := []string(nil)
+	stringSlice := []string{}
 	for _, s := range data.([]interface{}) {
 		stringSlice = append(stringSlice, s.(string))
 	}
@@ -424,6 +370,13 @@ func expandStringPtr(data interface{}) *string {
 	return scw.StringPtr(data.(string))
 }
 
+func expandBoolPtr(data interface{}) *bool {
+	if data == nil {
+		return nil
+	}
+	return scw.BoolPtr(data.(bool))
+}
+
 func flattenInt32Ptr(i *int32) interface{} {
 	if i == nil {
 		return 0
@@ -459,7 +412,7 @@ func flattenIPNet(ipNet scw.IPNet) string {
 		// We panic as this should never happen.
 		panic(err) // lintignore:R009
 	}
-	return string(raw[1 : len(raw)-1])
+	return string(raw[1 : len(raw)-1]) // remove quotes
 }
 
 func validateDuration() schema.SchemaValidateFunc {

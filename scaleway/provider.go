@@ -9,7 +9,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/plugin"
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"github.com/scaleway/scaleway-sdk-go/validation"
 )
 
 // Provider config can be used to provide additional config when creating provider.
@@ -98,6 +97,8 @@ func Provider(config *ProviderConfig) plugin.ProviderFunc {
 				"scaleway_instance_volume":         dataSourceScalewayInstanceVolume(),
 				"scaleway_baremetal_offer":         dataSourceScalewayBaremetalOffer(),
 				"scaleway_rdb_instance":            dataSourceScalewayRDBInstance(),
+				"scaleway_k8s_cluster":             dataSourceScalewayK8SCluster(),
+				"scaleway_k8s_pool":                dataSourceScalewayK8SPool(),
 				"scaleway_lb_ip":                   dataSourceScalewayLbIP(),
 				"scaleway_marketplace_image":       dataSourceScalewayMarketplaceImage(),
 				"scaleway_registry_namespace":      dataSourceScalewayRegistryNamespace(),
@@ -134,6 +135,10 @@ func Provider(config *ProviderConfig) plugin.ProviderFunc {
 type Meta struct {
 	// scwClient is the Scaleway SDK client.
 	scwClient *scw.Client
+	// httpClient can be either a regular http.Client used to make real HTTP requests
+	// or it can be a http.Client used to record and replay cassettes which is useful
+	// to replay recorded interactions with APIs locally
+	httpClient *http.Client
 }
 
 type MetaConfig struct {
@@ -171,12 +176,11 @@ func buildMeta(config *MetaConfig) (*Meta, error) {
 		scw.WithProfile(profile),
 	}
 
-	defaultHTTPClient := &http.Client{Transport: newRetryableTransport(http.DefaultTransport)}
+	httpClient := &http.Client{Transport: newRetryableTransport(http.DefaultTransport)}
 	if config.httpClient != nil {
-		opts = append(opts, scw.WithHTTPClient(config.httpClient))
-	} else {
-		opts = append(opts, scw.WithHTTPClient(defaultHTTPClient))
+		httpClient = config.httpClient
 	}
+	opts = append(opts, scw.WithHTTPClient(httpClient))
 
 	scwClient, err := scw.NewClient(opts...)
 	if err != nil {
@@ -184,7 +188,8 @@ func buildMeta(config *MetaConfig) (*Meta, error) {
 	}
 
 	return &Meta{
-		scwClient: scwClient,
+		scwClient:  scwClient,
+		httpClient: httpClient,
 	}, nil
 }
 
@@ -210,7 +215,6 @@ func loadProfile(d *schema.ResourceData) (*scw.Profile, error) {
 	envProfile := scw.LoadEnvProfile()
 
 	providerProfile := &scw.Profile{}
-
 	if d != nil {
 		if accessKey, exist := d.GetOk("access_key"); exist {
 			providerProfile.AccessKey = scw.StringPtr(accessKey.(string))
@@ -235,13 +239,13 @@ func loadProfile(d *schema.ResourceData) (*scw.Profile, error) {
 	// to the one of the defaultZone
 	if profile.DefaultZone != nil && *profile.DefaultZone != "" &&
 		(profile.DefaultRegion == nil || *profile.DefaultRegion == "") {
-		zone := *profile.DefaultZone
+		zone := scw.Zone(*profile.DefaultZone)
 		l.Debugf("guess region from %s zone", zone)
-		region := zone[:len(zone)-2]
-		if validation.IsRegion(region) {
-			profile.DefaultRegion = scw.StringPtr(region)
+		region, err := zone.Region()
+		if err == nil {
+			profile.DefaultRegion = scw.StringPtr(region.String())
 		} else {
-			l.Debugf("invalid guessed region '%s'", region)
+			l.Debugf("cannot guess region: %w", err)
 		}
 	}
 	return profile, nil

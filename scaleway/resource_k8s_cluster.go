@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	k8s "github.com/scaleway/scaleway-sdk-go/api/k8s/v1"
+	"github.com/scaleway/scaleway-sdk-go/api/k8s/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 )
 
@@ -252,7 +252,7 @@ func resourceScalewayK8SClusterCreate(ctx context.Context, d *schema.ResourceDat
 	autoscalerReq := &k8s.CreateClusterRequestAutoscalerConfig{}
 
 	if scaleDownDisabled, ok := d.GetOk("autoscaler_config.0.disable_scale_down"); ok {
-		autoscalerReq.ScaleDownDisabled = scw.BoolPtr((scaleDownDisabled.(bool)))
+		autoscalerReq.ScaleDownDisabled = scw.BoolPtr(scaleDownDisabled.(bool))
 	}
 
 	if scaleDownDelayAfterAdd, ok := d.GetOk("autoscaler_config.0.scale_down_delay_after_add"); ok {
@@ -283,15 +283,17 @@ func resourceScalewayK8SClusterCreate(ctx context.Context, d *schema.ResourceDat
 
 	req.AutoscalerConfig = autoscalerReq
 
-	autoUpgradeEnable, okAutoUpgradeEnable := d.GetOkExists("auto_upgrade.0.enable")
-	autoUpgradeStartHour, okAutoUpgradeStartHour := d.GetOkExists("auto_upgrade.0.maintenance_window_start_hour")
+	autoUpgradeEnable, okAutoUpgradeEnable := d.GetOk("auto_upgrade.0.enable")
+	autoUpgradeStartHour, okAutoUpgradeStartHour := d.GetOk("auto_upgrade.0.maintenance_window_start_hour")
 	autoUpgradeDay, okAutoUpgradeDay := d.GetOk("auto_upgrade.0.maintenance_window_day")
 
-	// check if either all or none of the auto upgrade attribute are set.
-	// if one auto upgrade attribute is set, they all must be set.
-	// if none is set, auto upgrade attributes will be computed.
-	if okAutoUpgradeEnable != okAutoUpgradeDay || okAutoUpgradeEnable != okAutoUpgradeStartHour {
-		return diag.FromErr(fmt.Errorf("all field or zero field of auto_upgrade must be set"))
+	if okAutoUpgradeEnable {
+		// check if either all or none of the auto upgrade attribute are set.
+		// if one auto upgrade attribute is set, they all must be set.
+		// if none is set, auto upgrade attributes will be computed.
+		if !(okAutoUpgradeDay && okAutoUpgradeStartHour) {
+			return diag.FromErr(fmt.Errorf("all field or zero field of auto_upgrade must be set"))
+		}
 	}
 
 	clusterAutoUpgradeEnabled := false
@@ -420,7 +422,8 @@ func resourceScalewayK8SClusterDefaultPoolRead(ctx context.Context, d *schema.Re
 	defaultPool["status"] = pool.Status.String()
 
 	if pool.PlacementGroupID != nil {
-		defaultPool["placement_group_id"] = newZonedIDStringFromRegion(region, *pool.PlacementGroupID) // TODO fix this ZonedIdFromRegion
+		zone := scw.Zone(region + "-1") // Placement groups are zoned resources.
+		defaultPool["placement_group_id"] = newZonedID(zone, *pool.PlacementGroupID)
 	}
 
 	err = d.Set("default_pool", []map[string]interface{}{defaultPool})
@@ -777,7 +780,7 @@ func resourceScalewayK8SClusterUpdate(ctx context.Context, d *schema.ResourceDat
 	autoscalerReq := &k8s.UpdateClusterRequestAutoscalerConfig{}
 
 	if d.HasChange("autoscaler_config.0.disable_scale_down") {
-		autoscalerReq.ScaleDownDisabled = scw.BoolPtr((d.Get("autoscaler_config.0.disable_scale_down").(bool)))
+		autoscalerReq.ScaleDownDisabled = scw.BoolPtr(d.Get("autoscaler_config.0.disable_scale_down").(bool))
 	}
 
 	if d.HasChange("autoscaler_config.0.scale_down_delay_after_add") {

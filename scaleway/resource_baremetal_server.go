@@ -6,7 +6,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	baremetal "github.com/scaleway/scaleway-sdk-go/api/baremetal/v1"
+	"github.com/scaleway/scaleway-sdk-go/api/baremetal/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	sdkValidation "github.com/scaleway/scaleway-sdk-go/validation"
 )
@@ -40,7 +40,7 @@ func resourceScalewayBaremetalServer() *schema.Resource {
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
-				Description: "ID of the server offer",
+				Description: "ID or name of the server offer",
 			},
 			"offer_id": {
 				Type:        schema.TypeString,
@@ -56,7 +56,7 @@ func resourceScalewayBaremetalServer() *schema.Resource {
 			"os_id": {
 				Type:        schema.TypeString,
 				Computed:    true,
-				Description: "The base image id of the server",
+				Description: "The base image ID of the server",
 			},
 			"ssh_key_ids": {
 				Type: schema.TypeList,

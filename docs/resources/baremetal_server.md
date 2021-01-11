@@ -19,7 +19,7 @@ data "scaleway_account_ssh_key" "main" {
 
 resource "scaleway_baremetal_server" "base" {
   zone		  = "fr-par-2"
-  offer       = "GP-BM1-M"
+  offer       = "GP-BM1-S"
   os          = "d17d6872-0412-45d9-a198-af82c34d3c5c"
   ssh_key_ids = [data.scaleway_account_ssh_key.main]
 }
@@ -32,7 +32,7 @@ The following arguments are supported:
 - `offer` - (Required) The offer name or UUID of the baremetal server.
 Use [this endpoint](https://developers.scaleway.com/en/products/baremetal/api/#get-334154) to find the right offer.
 
-~> **Important:** Updates to `offer_id` will recreate the server.
+~> **Important:** Updates to `offer` will recreate the server.
 
 - `os` - (Required) The UUID of the os to install on the server.
 Use [this endpoint](https://developers.scaleway.com/en/products/baremetal/api/#get-87598a) to find the right OS ID.

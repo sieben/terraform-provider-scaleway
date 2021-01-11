@@ -19,23 +19,9 @@ import (
 )
 
 var (
-	// Deprecated
-	testAccProviders map[string]*schema.Provider
-	// Deprecated
-	testAccProvider *schema.Provider
-
 	// UpdateCassettes will update all cassettes of a given test
 	UpdateCassettes = flag.Bool("cassettes", os.Getenv("TF_UPDATE_CASSETTES") == "true", "Record Cassettes")
 )
-
-func init() {
-	p := Provider(DefaultProviderConfig())()
-	testAccProvider = p
-	version += "-tftest"
-	testAccProviders = map[string]*schema.Provider{
-		"scaleway": p,
-	}
-}
 
 func testAccPreCheck(_ *testing.T) {}
 
@@ -77,6 +63,7 @@ func getHTTPRecoder(t *testing.T, update bool) (client *http.Client, cleanup fun
 
 	// Add a filter which removes Authorization headers from all requests:
 	r.AddFilter(func(i *cassette.Interaction) error {
+		i.Request.Headers = i.Request.Headers.Clone()
 		delete(i.Request.Headers, "x-auth-token")
 		delete(i.Request.Headers, "X-Auth-Token")
 		return nil

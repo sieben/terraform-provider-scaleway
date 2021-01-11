@@ -3,6 +3,7 @@ package scaleway
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -20,11 +21,12 @@ const (
 	defaultObjectBucketTimeout = 10 * time.Minute
 )
 
-func newS3Client(region, accessKey, secretKey string) (*s3.S3, error) {
+func newS3Client(httpClient *http.Client, region, accessKey, secretKey string) (*s3.S3, error) {
 	config := &aws.Config{}
 	config.WithRegion(region)
 	config.WithCredentials(credentials.NewStaticCredentials(accessKey, secretKey, ""))
 	config.WithEndpoint("https://s3." + region + ".scw.cloud")
+	config.WithHTTPClient(httpClient)
 	if strings.ToLower(os.Getenv("TF_LOG")) == "debug" {
 		config.WithLogLevel(aws.LogDebugWithHTTPBody)
 	}
@@ -40,7 +42,7 @@ func newS3ClientFromMeta(meta *Meta) (*s3.S3, error) {
 	region, _ := meta.scwClient.GetDefaultRegion()
 	accessKey, _ := meta.scwClient.GetAccessKey()
 	secretKey, _ := meta.scwClient.GetSecretKey()
-	return newS3Client(region.String(), accessKey, secretKey)
+	return newS3Client(meta.httpClient, region.String(), accessKey, secretKey)
 }
 
 func s3ClientWithRegion(d *schema.ResourceData, m interface{}) (*s3.S3, scw.Region, error) {
@@ -53,7 +55,7 @@ func s3ClientWithRegion(d *schema.ResourceData, m interface{}) (*s3.S3, scw.Regi
 	accessKey, _ := meta.scwClient.GetAccessKey()
 	secretKey, _ := meta.scwClient.GetSecretKey()
 
-	s3Client, err := newS3Client(region.String(), accessKey, secretKey)
+	s3Client, err := newS3Client(meta.httpClient, region.String(), accessKey, secretKey)
 	if err != nil {
 		return nil, "", err
 	}
@@ -69,7 +71,7 @@ func s3ClientWithRegionAndName(m interface{}, name string) (*s3.S3, scw.Region, 
 	}
 	accessKey, _ := meta.scwClient.GetAccessKey()
 	secretKey, _ := meta.scwClient.GetSecretKey()
-	s3Client, err := newS3Client(region.String(), accessKey, secretKey)
+	s3Client, err := newS3Client(meta.httpClient, region.String(), accessKey, secretKey)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -95,8 +97,7 @@ func flattenObjectBucketTags(tagsSet []*s3.Tag) map[string]interface{} {
 }
 
 func expandObjectBucketTags(tags interface{}) []*s3.Tag {
-	tagsSet := make([]*s3.Tag, 0)
-
+	tagsSet := []*s3.Tag(nil)
 	for key, value := range tags.(map[string]interface{}) {
 		tagsSet = append(tagsSet, &s3.Tag{
 			Key:   &key,
@@ -124,30 +125,73 @@ func isS3Err(err error, code string, message string) bool {
 }
 
 func flattenObjectBucketVersioning(versioningResponse *s3.GetBucketVersioningOutput) []map[string]interface{} {
-	vcl := make([]map[string]interface{}, 0, 1)
-	vc := make(map[string]interface{})
-	if versioningResponse.Status != nil && aws.StringValue(versioningResponse.Status) == s3.BucketVersioningStatusEnabled {
-		vc["enabled"] = true
-	} else {
-		vc["enabled"] = false
-	}
-	vcl = append(vcl, vc)
+	vcl := []map[string]interface{}{{}}
+	vcl[0]["enabled"] = versioningResponse.Status != nil && *versioningResponse.Status == s3.BucketVersioningStatusEnabled
 	return vcl
 }
 
 func expandObjectBucketVersioning(v []interface{}) *s3.VersioningConfiguration {
 	vc := &s3.VersioningConfiguration{}
-
+	vc.Status = scw.StringPtr(s3.BucketVersioningStatusSuspended)
 	if len(v) > 0 {
-		c := v[0].(map[string]interface{})
-
-		if c["enabled"].(bool) {
-			vc.Status = aws.String(s3.BucketVersioningStatusEnabled)
-		} else {
-			vc.Status = aws.String(s3.BucketVersioningStatusSuspended)
+		if c := v[0].(map[string]interface{}); c["enabled"].(bool) {
+			vc.Status = scw.StringPtr(s3.BucketVersioningStatusEnabled)
 		}
-	} else {
-		vc.Status = aws.String(s3.BucketVersioningStatusSuspended)
 	}
 	return vc
+}
+
+func flattenBucketCORS(corsResponse interface{}) []map[string]interface{} {
+	corsRules := make([]map[string]interface{}, 0)
+	if cors, ok := corsResponse.(*s3.GetBucketCorsOutput); ok && len(cors.CORSRules) > 0 {
+		corsRules = make([]map[string]interface{}, 0, len(cors.CORSRules))
+		for _, ruleObject := range cors.CORSRules {
+			rule := make(map[string]interface{})
+			rule["allowed_headers"] = flattenSliceStringPtr(ruleObject.AllowedHeaders)
+			rule["allowed_methods"] = flattenSliceStringPtr(ruleObject.AllowedMethods)
+			rule["allowed_origins"] = flattenSliceStringPtr(ruleObject.AllowedOrigins)
+			// Both the "ExposeHeaders" and "MaxAgeSeconds" might not be set.
+			if ruleObject.AllowedOrigins != nil {
+				rule["expose_headers"] = flattenSliceStringPtr(ruleObject.ExposeHeaders)
+			}
+			if ruleObject.MaxAgeSeconds != nil {
+				rule["max_age_seconds"] = int(*ruleObject.MaxAgeSeconds)
+			}
+			corsRules = append(corsRules, rule)
+		}
+	}
+	return corsRules
+}
+
+func expandBucketCORS(rawCors []interface{}, bucket string) []*s3.CORSRule {
+	rules := make([]*s3.CORSRule, 0, len(rawCors))
+	for _, cors := range rawCors {
+		corsMap := cors.(map[string]interface{})
+		r := &s3.CORSRule{}
+		for k, v := range corsMap {
+			l.Debugf("S3 bucket: %s, put CORS: %#v, %#v", bucket, k, v)
+			if k == "max_age_seconds" {
+				r.MaxAgeSeconds = scw.Int64Ptr(int64(v.(int)))
+			} else {
+				vMap := make([]*string, len(v.([]interface{})))
+				for i, vv := range v.([]interface{}) {
+					if str, ok := vv.(string); ok {
+						vMap[i] = scw.StringPtr(str)
+					}
+				}
+				switch k {
+				case "allowed_headers":
+					r.AllowedHeaders = vMap
+				case "allowed_methods":
+					r.AllowedMethods = vMap
+				case "allowed_origins":
+					r.AllowedOrigins = vMap
+				case "expose_headers":
+					r.ExposeHeaders = vMap
+				}
+			}
+		}
+		rules = append(rules, r)
+	}
+	return rules
 }

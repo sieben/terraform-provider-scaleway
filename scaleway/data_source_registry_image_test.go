@@ -10,13 +10,15 @@ import (
 )
 
 func TestAccScalewayDataSourceRegistryImage_Basic(t *testing.T) {
+	tt := NewTestTools(t)
+	defer tt.Cleanup()
 	ubuntuImageID := "4b5a47c0-6fbf-4388-8783-c07c28d3c2eb"
 
 	t.Skip("It is difficult to test this datasource as we cannot create registry images with Terraform.")
 	resource.ParallelTest(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckScalewayRegistryNamespaceBetaDestroy,
+		PreCheck:          func() { testAccPreCheck(t) },
+		ProviderFactories: tt.ProviderFactories,
+		CheckDestroy:      testAccCheckScalewayRegistryNamespaceBetaDestroy(tt),
 		Steps: []resource.TestStep{
 			{
 				Config: `
@@ -29,7 +31,7 @@ func TestAccScalewayDataSourceRegistryImage_Basic(t *testing.T) {
 					}
 				`,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckScalewayRegistryImageExists("data.scaleway_registry_image.ubuntu"),
+					testAccCheckScalewayRegistryImageExists(tt, "data.scaleway_registry_image.ubuntu"),
 
 					resource.TestCheckResourceAttr("data.scaleway_registry_image.ubuntu", "name", "ubuntu"),
 					resource.TestCheckResourceAttr("data.scaleway_registry_image.ubuntu", "id", "fr-par/"+ubuntuImageID),
@@ -54,14 +56,14 @@ func TestAccScalewayDataSourceRegistryImage_Basic(t *testing.T) {
 	})
 }
 
-func testAccCheckScalewayRegistryImageExists(n string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[n]
+func testAccCheckScalewayRegistryImageExists(tt *TestTools, n string) resource.TestCheckFunc {
+	return func(state *terraform.State) error {
+		rs, ok := state.RootModule().Resources[n]
 		if !ok {
 			return fmt.Errorf("resource not found: %s", n)
 		}
 
-		api, region, id, err := registryAPIWithRegionAndID(testAccProvider.Meta(), rs.Primary.ID)
+		api, region, id, err := registryAPIWithRegionAndID(tt.Meta, rs.Primary.ID)
 		if err != nil {
 			return nil
 		}

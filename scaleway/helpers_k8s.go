@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	k8s "github.com/scaleway/scaleway-sdk-go/api/k8s/v1"
+	"github.com/scaleway/scaleway-sdk-go/api/k8s/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 )
 
@@ -49,8 +49,10 @@ func k8sAPIWithRegion(d *schema.ResourceData, m interface{}) (*k8s.API, scw.Regi
 	k8sAPI := k8s.NewAPI(meta.scwClient)
 
 	region, err := extractRegion(d, meta)
-
-	return k8sAPI, region, err
+	if err != nil {
+		return nil, "", err
+	}
+	return k8sAPI, region, nil
 }
 
 func k8sAPIWithRegionAndID(m interface{}, id string) (*k8s.API, scw.Region, string, error) {
@@ -58,7 +60,10 @@ func k8sAPIWithRegionAndID(m interface{}, id string) (*k8s.API, scw.Region, stri
 	k8sAPI := k8s.NewAPI(meta.scwClient)
 
 	region, ID, err := parseRegionalID(id)
-	return k8sAPI, region, ID, err
+	if err != nil {
+		return nil, "", "", err
+	}
+	return k8sAPI, region, ID, nil
 }
 
 func k8sGetMinorVersionFromFull(version string) (string, error) {
